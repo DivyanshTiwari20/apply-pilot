@@ -24,11 +24,28 @@ https://github.com/user-attachments/assets/7ee3417f-43d4-4245-9952-35df1e77f2df
 
 ApplyPilot is a 6-stage autonomous job application pipeline. It discovers jobs across 5+ boards, scores them against your resume with AI, tailors your resume per job, writes cover letters, and **submits applications for you**. It navigates forms, uploads documents, answers screening questions, all hands-free.
 
-Three commands. That's it.
+**Everything runs on your own machine.** ApplyPilot is not a hosted service — there's no account to create and no server to send your data to. Your resume, profile, API keys, and generated documents stay on your computer. You bring your own (free) API key. It's open source, so you can read exactly what it does.
+
+---
+
+## Two Ways to Use It
+
+You can use ApplyPilot entirely from a **browser** (no command line needed) or from the **CLI**. Both do the same work and share the same local data.
+
+### 🖥️ Web UI — easiest, no command line needed
+
+Install once, then run a single command to open the app in your browser. A built-in setup wizard walks you through your API key, resume, profile, and job searches — then you run everything with buttons and watch progress live.
 
 ```bash
-pip install applypilot
-pip install --no-deps python-jobspy && pip install pydantic tls-client requests markdownify regex
+pip install "applypilot[web]"
+applypilot serve            # opens http://127.0.0.1:8000 in your browser
+```
+
+That's it. The web UI takes you from job discovery → AI scoring → tailored resume + cover letter (downloadable PDFs) → a direct **Apply** link for each job. *(Autonomous form-filling is CLI-only — see below.)*
+
+### ⌨️ CLI — for power users and automation
+
+```bash
 applypilot init          # one-time setup: resume, profile, preferences, API keys
 applypilot doctor        # verify your setup — shows what's installed and what's missing
 applypilot run           # discover > enrich > score > tailor > cover letters
@@ -38,21 +55,39 @@ applypilot apply -w 3    # parallel apply (3 Chrome instances)
 applypilot apply --dry-run  # fill forms without submitting
 ```
 
-> **Why two install commands?** `python-jobspy` pins an exact numpy version in its metadata that conflicts with pip's resolver, but works fine at runtime with any modern numpy. The `--no-deps` flag bypasses the resolver; the second command installs jobspy's actual runtime dependencies. Everything except `python-jobspy` installs normally.
+---
+
+## Install
+
+```bash
+# 1. Install ApplyPilot (the [web] extra adds the browser UI — recommended)
+pip install "applypilot[web]"
+
+# 2. Install the job-board scraper separately (see note below)
+pip install --no-deps python-jobspy
+pip install pydantic tls-client requests markdownify regex
+
+# 3. (Optional) browser engine — needed for some scrapers and for auto-apply
+playwright install chromium
+```
+
+> **Why is `python-jobspy` installed separately?** It pins an exact numpy version in its metadata that conflicts with pip's resolver, but works fine at runtime with any modern numpy. The `--no-deps` flag bypasses the resolver; the second line installs jobspy's actual runtime dependencies. Everything else installs normally.
+
+**Prefer the CLI only?** `pip install applypilot` (without `[web]`) is enough.
+
+After installing, either run **`applypilot serve`** for the web UI or **`applypilot init`** for the CLI setup wizard.
 
 ---
 
-## Two Paths
+## What you need
 
-### Full Pipeline (recommended)
-**Requires:** Python 3.11+, Node.js (for npx), Gemini API key (free), Claude Code CLI, Chrome
+| To do this | You need |
+|------------|----------|
+| Discover & browse jobs | Python 3.11+ |
+| AI scoring, resume tailoring, cover letters | + a **free** Gemini API key ([get one here](https://aistudio.google.com)) |
+| Autonomous auto-apply | + Chrome, [Claude Code CLI](https://claude.ai/code), and Node.js 18+ |
 
-Runs all 6 stages, from job discovery to autonomous application submission. This is the full power of ApplyPilot.
-
-### Discovery + Tailoring Only
-**Requires:** Python 3.11+, Gemini API key (free)
-
-Runs stages 1-5: discovers jobs, scores them, tailors your resume, generates cover letters. You submit applications manually with the AI-prepared materials.
+The web UI and CLI both unlock more features as you add these — start with just Python and a free API key.
 
 ---
 
@@ -90,7 +125,7 @@ Each stage is independent. Run them all or pick what you need.
 |-----------|-------------|---------|
 | Python 3.11+ | Everything | Core runtime |
 | Node.js 18+ | Auto-apply | Needed for `npx` to run Playwright MCP server |
-| Gemini API key | Scoring, tailoring, cover letters | Free tier (15 RPM / 1M tokens/day) is enough |
+| Gemini API key | Scoring, tailoring, cover letters | Gemini Flash-Lite free tier is the fast default |
 | Chrome/Chromium | Auto-apply | Auto-detected on most systems |
 | Claude Code CLI | Auto-apply | Install from [claude.ai/code](https://claude.ai/code) |
 
@@ -108,7 +143,7 @@ Each stage is independent. Run them all or pick what you need.
 
 ## Configuration
 
-All generated by `applypilot init`:
+These files live in `~/.applypilot/` and are created for you by the **web setup wizard** (`applypilot serve`) or the **CLI wizard** (`applypilot init`) — you don't normally edit them by hand:
 
 ### `profile.json`
 Your personal data in one structured file: contact info, work authorization, compensation, experience, skills, resume facts (preserved during tailoring), and EEO defaults. Powers scoring, tailoring, and form auto-fill.
@@ -117,7 +152,7 @@ Your personal data in one structured file: contact info, work authorization, com
 Job search queries, target titles, locations, boards. Run multiple searches with different parameters.
 
 ### `.env`
-API keys and runtime config: `GEMINI_API_KEY`, `LLM_MODEL`, `CAPSOLVER_API_KEY` (optional).
+API keys and runtime config: `LLM_PROVIDER`, `GEMINI_API_KEY`, `LLM_MODEL`, `CAPSOLVER_API_KEY` (optional).
 
 ### Package configs (shipped with ApplyPilot)
 - `config/employers.yaml` - Workday employer registry (48 preconfigured)
@@ -161,7 +196,10 @@ applypilot apply --gen --url URL       # generate prompt file for manual debuggi
 ## CLI Reference
 
 ```
-applypilot init                         # First-time setup wizard
+applypilot serve                        # Launch the web UI (browser app)
+applypilot serve --port 3000            # Use a different port
+applypilot serve --no-browser           # Don't auto-open the browser
+applypilot init                         # First-time setup wizard (CLI)
 applypilot doctor                       # Verify setup, diagnose missing requirements
 applypilot run [stages...]              # Run pipeline stages (or 'all')
 applypilot run --workers 4              # Parallel discovery/enrichment
@@ -182,9 +220,24 @@ applypilot dashboard                    # Open HTML results dashboard
 
 ---
 
+## Troubleshooting
+
+| Problem | Fix |
+|---------|-----|
+| `applypilot: command not found` | Make sure your Python scripts directory is on your `PATH`, or try `python -m applypilot`. On some systems use `pipx install applypilot` for an isolated, always-on-PATH install. |
+| Web UI won't start / "needs extra packages" | Install the web extra: `pip install "applypilot[web]"`. |
+| No jobs found during discovery | Check your `searches.yaml` titles/location, and confirm `python-jobspy` installed (see Install). Job boards also rate-limit — try again later or use `--workers 1`. |
+| Scoring/tailoring stops partway on the free tier | This is expected on Gemini's free quota. ApplyPilot runs in **frugal mode** by default to finish a few jobs completely before the quota runs out. Run again later, or add a paid/local key. |
+| LinkedIn "job posting removed" when clicking Apply | LinkedIn listing links expire or require login. Jobs from Workday/direct career sites give working apply links. |
+| Auto-apply (`applypilot apply`) does nothing | It needs Chrome + the [Claude Code CLI](https://claude.ai/code) + Node.js. Run `applypilot doctor` to see what's missing. |
+
+Run **`applypilot doctor`** any time to see what's installed and what's missing.
+
+---
+
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, coding standards, and PR guidelines.
+ApplyPilot is open source (AGPL-3.0) and contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, coding standards, and PR guidelines. Please also read our [Code of Conduct](CODE_OF_CONDUCT.md). To report a security issue, see [SECURITY.md](SECURITY.md).
 
 ---
 
@@ -193,3 +246,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, coding standards, 
 ApplyPilot is licensed under the [GNU Affero General Public License v3.0](LICENSE).
 
 You are free to use, modify, and distribute this software. If you deploy a modified version as a service, you must release your source code under the same license.
+"# apply-pilot" 
