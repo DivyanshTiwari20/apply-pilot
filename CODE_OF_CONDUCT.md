@@ -56,11 +56,11 @@ an individual is officially representing the community in public spaces.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the project maintainers by opening a confidential report through the
+reported to the project maintainer by opening a confidential report through the
 repository's GitHub
-[Security Advisories](https://github.com/Pickle-Pixel/ApplyPilot/security/advisories/new)
+[Security Advisories](https://github.com/DivyanshTiwari20/apply-pilot/security/advisories/new)
 or by contacting the maintainer via their
-[GitHub profile](https://github.com/Pickle-Pixel). All complaints will be
+[GitHub profile](https://github.com/DivyanshTiwari20). All complaints will be
 reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the

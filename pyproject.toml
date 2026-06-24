@@ -5,7 +5,7 @@ description = "AI-powered end-to-end job application pipeline"
 readme = "README.md"
 license = "AGPL-3.0-only"
 requires-python = ">=3.11"
-authors = [{name = "Pickle-Pixel"}]
+authors = [{name = "Divyansh Tiwari"}]
 keywords = ["job-search", "automation", "ai", "resume", "apply", "job-application"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -36,9 +36,9 @@ web = ["fastapi>=0.110", "uvicorn[standard]>=0.27"]
 applypilot = "applypilot.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/Pickle-Pixel/ApplyPilot"
-Repository = "https://github.com/Pickle-Pixel/ApplyPilot"
-Issues = "https://github.com/Pickle-Pixel/ApplyPilot/issues"
+Homepage = "https://github.com/DivyanshTiwari20/apply-pilot"
+Repository = "https://github.com/DivyanshTiwari20/apply-pilot"
+Issues = "https://github.com/DivyanshTiwari20/apply-pilot/issues"
 
 [build-system]
 requires = ["hatchling"]

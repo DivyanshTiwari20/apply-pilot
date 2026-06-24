@@ -28,7 +28,7 @@ pip install --upgrade applypilot
 Please **do not** open a public issue for security vulnerabilities.
 
 Instead, report it privately through GitHub's
-[Security Advisories](https://github.com/Pickle-Pixel/ApplyPilot/security/advisories/new)
+[Security Advisories](https://github.com/DivyanshTiwari20/apply-pilot/security/advisories/new)
 for this repository. Include:
 
 - a description of the vulnerability and its impact,
