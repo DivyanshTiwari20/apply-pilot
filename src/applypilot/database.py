@@ -219,6 +219,44 @@ def ensure_columns(conn: sqlite3.Connection | None = None) -> list[str]:
     return added
 
 
+def purge_stale_jobs(
+    max_age_hours: int, conn: sqlite3.Connection | None = None
+) -> int:
+    """Delete jobs older than ``max_age_hours`` so only fresh postings remain.
+
+    Age is measured from ``discovered_at``. Jobs the user has already applied to
+    are always kept (so application history survives). This is called at the
+    start of a run that includes discovery, keeping the dashboard focused on
+    currently-open postings instead of week-old expired ones.
+
+    Args:
+        max_age_hours: Maximum job age to keep, in hours.
+        conn: Database connection. Uses get_connection() if None.
+
+    Returns:
+        Number of jobs deleted.
+    """
+    if conn is None:
+        conn = get_connection()
+    if max_age_hours <= 0:
+        return 0
+
+    from datetime import timedelta
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=max_age_hours)).isoformat()
+    # discovered_at is stored as a UTC ISO-8601 string, which sorts
+    # lexicographically by time — so a string comparison is a valid age check.
+    cur = conn.execute(
+        "DELETE FROM jobs "
+        "WHERE applied_at IS NULL "
+        "AND discovered_at IS NOT NULL "
+        "AND discovered_at < ?",
+        (cutoff,),
+    )
+    conn.commit()
+    return cur.rowcount
+
+
 def get_stats(conn: sqlite3.Connection | None = None) -> dict:
     """Return job counts by pipeline stage.
 

@@ -256,17 +256,20 @@ def _setup_ai_features() -> None:
 
     if provider == "gemini":
         api_key = Prompt.ask("Gemini API key (from aistudio.google.com)")
-        model = Prompt.ask("Model", default="gemini-2.0-flash")
+        model = Prompt.ask("Model", default="gemini-3.1-flash-lite")
+        env_lines.append("LLM_PROVIDER=gemini")
         env_lines.append(f"GEMINI_API_KEY={api_key}")
         env_lines.append(f"LLM_MODEL={model}")
     elif provider == "openai":
         api_key = Prompt.ask("OpenAI API key")
         model = Prompt.ask("Model", default="gpt-4o-mini")
+        env_lines.append("LLM_PROVIDER=openai")
         env_lines.append(f"OPENAI_API_KEY={api_key}")
         env_lines.append(f"LLM_MODEL={model}")
     elif provider == "local":
         url = Prompt.ask("Local LLM endpoint URL", default="http://localhost:8080/v1")
         model = Prompt.ask("Model name", default="local-model")
+        env_lines.append("LLM_PROVIDER=local")
         env_lines.append(f"LLM_URL={url}")
         env_lines.append(f"LLM_MODEL={model}")
 

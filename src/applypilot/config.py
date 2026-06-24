@@ -16,9 +16,11 @@ RESUME_PDF_PATH = APP_DIR / "resume.pdf"
 SEARCH_CONFIG_PATH = APP_DIR / "searches.yaml"
 ENV_PATH = APP_DIR / ".env"
 
-# Generated output
-TAILORED_DIR = APP_DIR / "tailored_resumes"
-COVER_LETTER_DIR = APP_DIR / "cover_letters"
+# Generated output — defaults to current working directory so files appear
+# in the project folder where you run `applypilot`. Override with APPLYPILOT_OUTPUT_DIR.
+OUTPUT_DIR = Path(os.environ.get("APPLYPILOT_OUTPUT_DIR", Path.cwd()))
+TAILORED_DIR = OUTPUT_DIR / "tailored_resumes"
+COVER_LETTER_DIR = OUTPUT_DIR / "cover_letters"
 LOG_DIR = APP_DIR / "logs"
 
 # Chrome worker isolation
@@ -87,7 +89,7 @@ def get_chrome_user_data() -> Path:
 
 def ensure_dirs():
     """Create all required directories."""
-    for d in [APP_DIR, TAILORED_DIR, COVER_LETTER_DIR, LOG_DIR, CHROME_WORKER_DIR, APPLY_WORKER_DIR]:
+    for d in [APP_DIR, OUTPUT_DIR, TAILORED_DIR, COVER_LETTER_DIR, LOG_DIR, CHROME_WORKER_DIR, APPLY_WORKER_DIR]:
         d.mkdir(parents=True, exist_ok=True)
 
 
@@ -169,6 +171,40 @@ DEFAULTS = {
     "apply_timeout": 300,
     "viewport": "1280x900",
 }
+
+
+# ---------------------------------------------------------------------------
+# Frugal (free-tier) mode
+# ---------------------------------------------------------------------------
+#
+# On a constrained free tier (Gemini: 15 req/min + a daily cap) the pipeline's
+# default batch-by-stage flow exhausts the quota before a single job is finished
+# end-to-end, so the user gets nothing. Frugal mode flips the LLM portion to
+# depth-first ("finish a few jobs completely, one at a time") and trims spend so
+# at least 1-2 fully-done jobs (resume + cover letter + PDF) always come out.
+
+FRUGAL_DEFAULTS = {
+    "max_jobs": 5,            # cap jobs through the LLM stages per run
+    "min_interval_sec": 1.0,  # Flash-Lite is built for low-latency high-volume work
+    "validation": "lenient",  # skip the LLM judge: halves tailor/cover calls
+}
+
+
+def should_use_frugal() -> bool:
+    """Heuristic: is the user on a constrained free tier?
+
+    True when Gemini is the active provider (the free-tier path this project is
+    built around) and no local endpoint is configured. Paid Gemini or a local
+    model can opt out with ``--no-frugal``.
+    """
+    load_env()
+    if os.environ.get("LLM_PROVIDER", "").lower() == "local":
+        return False
+    if bool(os.environ.get("GEMINI_API_KEY")) and not os.environ.get("OPENAI_API_KEY"):
+        return True
+    if os.environ.get("LLM_URL"):  # local model — no external quota to protect
+        return False
+    return bool(os.environ.get("GEMINI_API_KEY")) and not os.environ.get("OPENAI_API_KEY")
 
 
 def load_env():

@@ -30,6 +30,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "ruff>=0.1"]
+web = ["fastapi>=0.110", "uvicorn[standard]>=0.27"]
 
 [project.scripts]
 applypilot = "applypilot.cli:app"

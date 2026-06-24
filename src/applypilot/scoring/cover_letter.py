@@ -5,14 +5,15 @@ postings. All personal data (name, skills, achievements) comes from the user's
 profile at runtime. No hardcoded personal information.
 """
 
-import json
 import logging
 import re
 import time
 from datetime import datetime, timezone
 
+from rich.console import Console
+
 from applypilot.config import COVER_LETTER_DIR, RESUME_PATH, load_profile
-from applypilot.database import get_connection, get_jobs_by_stage
+from applypilot.database import get_connection
 from applypilot.llm import get_client
 from applypilot.scoring.validator import (
     BANNED_WORDS,
@@ -22,6 +23,7 @@ from applypilot.scoring.validator import (
 )
 
 log = logging.getLogger(__name__)
+console = Console()
 
 MAX_ATTEMPTS = 5  # max cross-run retries before giving up
 
@@ -183,6 +185,46 @@ def generate_cover_letter(
     return letter  # last attempt even if failed
 
 
+def save_cover_result(conn, job: dict, letter: str, commit: bool = True) -> dict:
+    """Persist one cover letter: write the text file, PDF, and DB row.
+
+    Shared by the batch entry point and the depth-first (frugal) orchestrator.
+    Returns a result dict: url, path, pdf_path, title, site.
+    """
+    COVER_LETTER_DIR.mkdir(parents=True, exist_ok=True)
+
+    safe_title = re.sub(r"[^\w\s-]", "", job["title"])[:50].strip().replace(" ", "_")
+    safe_site = re.sub(r"[^\w\s-]", "", job["site"])[:20].strip().replace(" ", "_")
+    prefix = f"{safe_site}_{safe_title}"
+
+    cl_path = COVER_LETTER_DIR / f"{prefix}_CL.txt"
+    cl_path.write_text(letter, encoding="utf-8")
+
+    pdf_path = None
+    try:
+        from applypilot.scoring.pdf import convert_to_pdf
+        pdf_path = str(convert_to_pdf(cl_path))
+    except Exception:
+        log.debug("PDF generation failed for %s", cl_path, exc_info=True)
+
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "UPDATE jobs SET cover_letter_path=?, cover_letter_at=?, "
+        "cover_attempts=COALESCE(cover_attempts,0)+1 WHERE url=?",
+        (str(cl_path), now, job["url"]),
+    )
+    if commit:
+        conn.commit()
+
+    return {
+        "url": job["url"],
+        "path": str(cl_path),
+        "pdf_path": pdf_path,
+        "title": job["title"],
+        "site": job["site"],
+    }
+
+
 # ── Batch Entry Point ────────────────────────────────────────────────────
 
 def run_cover_letters(min_score: int = 7, limit: int = 20,
@@ -213,7 +255,7 @@ def run_cover_letters(min_score: int = 7, limit: int = 20,
     ).fetchall()
 
     if not jobs:
-        log.info("No jobs needing cover letters (score >= %d).", min_score)
+        console.print(f"  [dim]No jobs needing cover letters (score >= {min_score}).[/dim]")
         return {"generated": 0, "errors": 0, "elapsed": 0.0}
 
     # Convert rows to dicts
@@ -222,81 +264,52 @@ def run_cover_letters(min_score: int = 7, limit: int = 20,
         jobs = [dict(zip(columns, row)) for row in jobs]
 
     COVER_LETTER_DIR.mkdir(parents=True, exist_ok=True)
-    log.info(
-        "Generating cover letters for %d jobs (score >= %d)...",
-        len(jobs), min_score,
+    est_min = max(1, round(len(jobs) / 15))
+    console.print(
+        f"  Writing [bold]{len(jobs)}[/bold] cover letters "
+        f"[dim](~{est_min} min at Gemini free tier)[/dim]"
     )
     t0 = time.time()
     completed = 0
     results: list[dict] = []
     error_count = 0
 
+    saved = 0
     for job in jobs:
         completed += 1
+        width = len(str(len(jobs)))
         try:
             letter = generate_cover_letter(resume_text, job, profile,
                                           validation_mode=validation_mode)
-
-            # Build safe filename prefix
-            safe_title = re.sub(r"[^\w\s-]", "", job["title"])[:50].strip().replace(" ", "_")
-            safe_site = re.sub(r"[^\w\s-]", "", job["site"])[:20].strip().replace(" ", "_")
-            prefix = f"{safe_site}_{safe_title}"
-
-            cl_path = COVER_LETTER_DIR / f"{prefix}_CL.txt"
-            cl_path.write_text(letter, encoding="utf-8")
-
-            # Generate PDF (best-effort)
-            pdf_path = None
-            try:
-                from applypilot.scoring.pdf import convert_to_pdf
-                pdf_path = str(convert_to_pdf(cl_path))
-            except Exception:
-                log.debug("PDF generation failed for %s", cl_path, exc_info=True)
-
-            result = {
-                "url": job["url"],
-                "path": str(cl_path),
-                "pdf_path": pdf_path,
-                "title": job["title"],
-                "site": job["site"],
-            }
+            result = save_cover_result(conn, job, letter, commit=False)
             results.append(result)
-
-            elapsed = time.time() - t0
-            rate = completed / elapsed if elapsed > 0 else 0
-            log.info(
-                "%d/%d [OK] | %.1f jobs/min | %s",
-                completed, len(jobs), rate * 60, result["title"][:40],
+            saved += 1
+            console.print(
+                f"  [{completed:>{width}}/{len(jobs)}] [green]written[/green]  "
+                f"{result['title'][:45]:<45} @ {result['site'][:20]}"
             )
         except Exception as e:
-            result = {
-                "url": job["url"], "title": job["title"], "site": job["site"],
-                "path": None, "pdf_path": None, "error": str(e),
-            }
-            error_count += 1
-            results.append(result)
-            log.error("%d/%d [ERROR] %s -- %s", completed, len(jobs), job["title"][:40], e)
-
-    # Persist to DB: increment attempt counter for ALL, save path only for successes
-    now = datetime.now(timezone.utc).isoformat()
-    saved = 0
-    for r in results:
-        if r.get("path"):
-            conn.execute(
-                "UPDATE jobs SET cover_letter_path=?, cover_letter_at=?, "
-                "cover_attempts=COALESCE(cover_attempts,0)+1 WHERE url=?",
-                (r["path"], now, r["url"]),
-            )
-            saved += 1
-        else:
             conn.execute(
                 "UPDATE jobs SET cover_attempts=COALESCE(cover_attempts,0)+1 WHERE url=?",
-                (r["url"],),
+                (job["url"],),
             )
+            results.append({
+                "url": job["url"], "title": job["title"], "site": job["site"],
+                "path": None, "pdf_path": None, "error": str(e),
+            })
+            error_count += 1
+            console.print(
+                f"  [{completed:>{width}}/{len(jobs)}] [red]error  [/red]  "
+                f"{job['title'][:45]:<45} — {e}"
+            )
+
+    # save_cover_result already updated each row; flush any buffered writes.
     conn.commit()
 
     elapsed = time.time() - t0
-    log.info("Cover letters done in %.1fs: %d generated, %d errors", elapsed, saved, error_count)
+    console.print(
+        f"  [bold]Cover letters done:[/bold] {saved} written, {error_count} errors — {elapsed:.1f}s"
+    )
 
     return {
         "generated": saved,

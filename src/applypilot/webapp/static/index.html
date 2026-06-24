@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ApplyPilot</title>
+<!-- Set theme before paint to avoid a flash of the wrong mode. -->
+<script>
+(function () {
+  var saved = localStorage.getItem("theme");
+  var sys = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  document.documentElement.setAttribute("data-theme", saved || sys);
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --font: "Inter", -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --radius: 14px; --radius-sm: 10px;
+  }
+  :root[data-theme="light"] {
+    --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f2f4f7;
+    --border: #e7e9ef; --border-strong: #d8dce3;
+    --text: #1b1f27; --muted: #6b7280;
+    --accent: #5b63f5; --accent-weak: #eef0fe; --accent-ink: #ffffff;
+    --good: #15a34a; --good-weak: #e8f6ed;
+    --warn: #c2740a; --warn-weak: #fbf0dc;
+    --danger: #dc2626; --danger-weak: #fdeaea;
+    --shadow: 0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1014; --surface: #171a21; --surface-2: #1e222b;
+    --border: #262a33; --border-strong: #313643;
+    --text: #e7e9ee; --muted: #939bab;
+    --accent: #6b8afd; --accent-weak: #1a2233; --accent-ink: #ffffff;
+    --good: #34d399; --good-weak: #14271f;
+    --warn: #f0b429; --warn-weak: #2a2310;
+    --danger: #f06363; --danger-weak: #2a1717;
+    --shadow: 0 1px 2px rgba(0,0,0,.28);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.55 var(--font); -webkit-font-smoothing: antialiased;
+  }
+  /* ── Header ─────────────────────────────────────────────────────── */
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 24px; border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; background: color-mix(in srgb, var(--bg) 86%, transparent);
+    backdrop-filter: blur(10px); z-index: 5;
+  }
+  .logo { font-weight: 700; letter-spacing: -.2px; font-size: 17px; }
+  .logo span { color: var(--accent); }
+  .beta {
+    font-size: 10px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase;
+    color: var(--accent); background: var(--accent-weak);
+    padding: 2px 7px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  }
+  .spacer { margin-left: auto; }
+  .pill {
+    font-size: 12px; font-weight: 500; color: var(--muted);
+    border: 1px solid var(--border); padding: 4px 11px; border-radius: 999px;
+  }
+  .pill.ok { color: var(--good); border-color: color-mix(in srgb, var(--good) 35%, transparent); background: var(--good-weak); }
+  .pill.bad { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, transparent); background: var(--warn-weak); }
+  .iconbtn {
+    display: inline-grid; place-items: center; width: 34px; height: 34px;
+    border-radius: 9px; border: 1px solid var(--border); background: var(--surface);
+    color: var(--muted); cursor: pointer; padding: 0; position: relative;
+  }
+  .iconbtn:hover { color: var(--text); border-color: var(--border-strong); }
+  .iconbtn svg { width: 17px; height: 17px; }
+  .iconbtn .dot {
+    position: absolute; top: -3px; right: -3px; width: 9px; height: 9px;
+    border-radius: 50%; background: var(--warn); border: 2px solid var(--bg);
+  }
+  /* ── Layout ─────────────────────────────────────────────────────── */
+  main { max-width: 1080px; margin: 0 auto; padding: 26px 24px 60px; display: grid; gap: 18px; }
+  .page-head h1 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -.4px; }
+  .page-head p { margin: 5px 0 0; color: var(--muted); font-size: 14px; max-width: 560px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow);
+  }
+  .card h2 {
+    margin: 0 0 16px; font-size: 12px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .6px; color: var(--muted);
+  }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 5px; font-weight: 500; }
+  input, select {
+    background: var(--surface); border: 1px solid var(--border-strong); color: var(--text);
+    padding: 10px 12px; border-radius: var(--radius-sm); font-size: 14px; width: 100%;
+    font-family: var(--font); outline: none; transition: border-color .12s, box-shadow .12s;
+  }
+  input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-weak); }
+  .field { flex: 1; min-width: 130px; }
+  button {
+    background: var(--accent); color: var(--accent-ink); border: 0; padding: 10px 18px;
+    border-radius: var(--radius-sm); font-weight: 600; font-size: 14px; cursor: pointer;
+    font-family: var(--font); transition: filter .12s, opacity .12s;
+  }
+  button:hover { filter: brightness(1.06); }
+  button.secondary { background: var(--surface); border: 1px solid var(--border-strong); color: var(--text); }
+  button.secondary:hover { filter: none; border-color: var(--muted); }
+  button:disabled { opacity: .5; cursor: not-allowed; filter: none; }
+  .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; font-size: 13px; color: var(--text); }
+  /* ── Stats ──────────────────────────────────────────────────────── */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .stat { background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .stat b { display: block; font-size: 26px; font-weight: 700; letter-spacing: -.5px; }
+  .stat span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 500; }
+  /* ── Live feed ──────────────────────────────────────────────────── */
+  #feed { height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 4px; }
+  .ev { display: flex; gap: 10px; align-items: baseline; padding: 8px 11px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border); animation: pop .18s ease; }
+  @keyframes pop { from { opacity: 0; transform: translateY(4px);} to { opacity: 1; transform: none; } }
+  .ev .t { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 11px; min-width: 58px; }
+  .ev .msg { flex: 1; }
+  .ev.dot-complete { border-color: color-mix(in srgb, var(--good) 40%, transparent); } .ev.dot-complete .msg { color: var(--good); }
+  .ev.dot-quota, .ev.dot-rate { border-color: color-mix(in srgb, var(--warn) 40%, transparent); } .ev.dot-quota .msg, .ev.dot-rate .msg { color: var(--warn); }
+  .ev.dot-error { border-color: color-mix(in srgb, var(--danger) 40%, transparent); } .ev.dot-error .msg { color: var(--danger); }
+  .ev.dot-stage .msg { font-weight: 600; }
+  .now { display: none; align-items: center; gap: 11px; margin-bottom: 14px; padding: 11px 13px; background: var(--accent-weak); border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); border-radius: 10px; }
+  /* ── Table ──────────────────────────────────────────────────────── */
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 13px 10px; border-bottom: 1px solid var(--border); font-size: 13.5px; }
+  thead th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; padding-top: 0; }
+  tbody tr { transition: background .1s; }
+  tbody tr:hover { background: var(--surface-2); }
+  tbody tr:last-child td { border-bottom: 0; }
+  .score-pill { display: inline-grid; place-items: center; min-width: 30px; height: 26px; padding: 0 8px; border-radius: 8px; font-weight: 700; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .s-hi { color: var(--good); background: var(--good-weak); }
+  .s-mid { color: var(--warn); background: var(--warn-weak); }
+  .s-lo { color: var(--muted); background: var(--surface-2); }
+  .title-cell { font-weight: 500; }
+  .chip { display: inline-block; font-size: 12px; padding: 3px 10px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); }
+  .badge { font-size: 11px; font-weight: 500; padding: 3px 9px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); text-transform: capitalize; }
+  .badge.b-ready, .badge.b-applied { color: var(--good); background: var(--good-weak); border-color: color-mix(in srgb, var(--good) 30%, transparent); }
+  .files a { color: var(--muted); }
+  .files a:hover { color: var(--accent); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .apply-link { display: inline-block; padding: 5px 13px; border-radius: 8px; background: var(--accent); color: var(--accent-ink); font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .apply-link:hover { text-decoration: none; filter: brightness(1.08); }
+  .hint { color: var(--muted); font-size: 12.5px; }
+  .empty { color: var(--muted); text-align: center; padding: 32px; }
+  .spinner { width: 15px; height: 15px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color: var(--accent); animation: spin .8s linear infinite; flex: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  /* ── Settings modal ─────────────────────────────────────────────── */
+  .overlay { position: fixed; inset: 0; background: rgba(10,12,16,.5); backdrop-filter: blur(2px); display: none; align-items: flex-start; justify-content: center; padding: 90px 20px; z-index: 20; }
+  .overlay.show { display: flex; }
+  .modal { width: 100%; max-width: 420px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 20px 50px rgba(0,0,0,.25); padding: 22px; animation: pop .15s ease; }
+  .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+  .modal-head h3 { margin: 0; font-size: 16px; font-weight: 700; }
+  .modal .ok-note { color: var(--good); font-size: 12.5px; margin: 10px 0 0; display: none; }
+  /* ── Setup wizard ───────────────────────────────────────────────── */
+  textarea {
+    background: var(--surface); border: 1px solid var(--border-strong); color: var(--text);
+    padding: 11px 12px; border-radius: var(--radius-sm); font: 13.5px/1.5 var(--font);
+    width: 100%; resize: vertical; outline: none; transition: border-color .12s, box-shadow .12s;
+  }
+  textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-weak); }
+  .setup-card { max-width: 640px; }
+  .setup-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .setup-head h3 { margin: 0; font-size: 18px; font-weight: 700; }
+  .setup-sub { color: var(--muted); margin: 6px 0 18px; font-size: 13px; }
+  .steps { display: flex; gap: 6px; }
+  .steps .dot { width: 22px; height: 5px; border-radius: 999px; background: var(--border-strong); transition: background .15s; }
+  .steps .dot.on { background: var(--accent); }
+  .steps .dot.done { background: color-mix(in srgb, var(--accent) 55%, transparent); }
+  .step { max-height: 56vh; overflow-y: auto; padding-right: 6px; }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .form-grid .full { grid-column: 1 / -1; }
+  .sub-h { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin: 16px 0 0; grid-column: 1 / -1; }
+  .setup-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 18px; gap: 10px; }
+  .check { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }
+  .check input { width: auto; }
+  @media (max-width: 880px) { .stats { grid-template-columns: repeat(2, 1fr); } .form-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">Apply<span>Pilot</span></div>
+  <span class="beta">Beta</span>
+  <div class="spacer"></div>
+  <div id="setupPill" class="pill" style="display:none"></div>
+  <div id="runPill" class="pill">idle</div>
+  <button class="iconbtn" id="themeToggle" title="Toggle theme" aria-label="Toggle theme"></button>
+  <button class="iconbtn" id="settingsBtn" title="Settings" aria-label="Settings">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    <span class="dot" id="keyDot" style="display:none"></span>
+  </button>
+</header>
+
+<main>
+  <div class="page-head">
+    <h1>Dashboard</h1>
+    <p>Find roles, tailor your resume, and generate cover letters — then apply.</p>
+  </div>
+
+  <!-- Run -->
+  <div class="card">
+    <h2>Run the pipeline</h2>
+    <div class="row" style="margin-bottom:14px">
+      <div class="field">
+        <label>What to run</label>
+        <select id="stages">
+          <option value="score,tailor,cover,pdf">Process existing jobs</option>
+          <option value="all">Full run (find + process)</option>
+          <option value="discover,enrich">Find new jobs only</option>
+        </select>
+      </div>
+      <div class="field" style="max-width:120px">
+        <label>Max jobs</label>
+        <input id="maxJobs" type="number" min="0" value="5" />
+      </div>
+      <div class="field" style="max-width:120px">
+        <label>Min score</label>
+        <input id="minScore" type="number" min="1" max="10" value="7" />
+      </div>
+    </div>
+    <div class="row" style="justify-content:space-between">
+      <label class="switch"><input id="frugal" type="checkbox" checked /> Frugal mode</label>
+      <div class="row" style="gap:8px">
+        <button id="stopBtn" class="secondary" style="display:none">Stop</button>
+        <button id="runBtn">Start run</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="card">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px">
+      <h2 style="margin:0">Pipeline status</h2>
+      <button class="secondary" id="resetBtn" style="padding:7px 13px; font-size:12px">Reset data</button>
+    </div>
+    <div class="stats" id="stats">
+      <div class="stat"><b id="st-total">–</b><span>Discovered</span></div>
+      <div class="stat"><b id="st-scored">–</b><span>Scored</span></div>
+      <div class="stat"><b id="st-tailored">–</b><span>Tailored</span></div>
+      <div class="stat"><b id="st-ready">–</b><span>Ready</span></div>
+    </div>
+  </div>
+
+  <!-- Live feed -->
+  <div class="card">
+    <h2>Live activity</h2>
+    <div class="now" id="nowRunning">
+      <span class="spinner"></span>
+      <span id="nowMsg" style="flex:1">Working…</span>
+      <span id="nowTime" style="color:var(--muted); font-variant-numeric:tabular-nums">0s</span>
+    </div>
+    <div id="feed"><div class="empty">Start a run to watch every step happen live.</div></div>
+  </div>
+
+  <!-- Jobs -->
+  <div class="card">
+    <h2>Top jobs</h2>
+    <div id="jobsWrap"><div class="empty">No scored jobs yet.</div></div>
+  </div>
+</main>
+
+<!-- Setup wizard -->
+<div class="overlay" id="setup">
+  <div class="modal setup-card">
+    <div class="setup-head">
+      <h3 id="setupTitle">Welcome to ApplyPilot</h3>
+      <div class="row" style="gap:14px">
+        <div class="steps" id="stepDots"></div>
+        <button class="iconbtn" id="closeSetup" style="border:0" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+    </div>
+    <p class="setup-sub" id="setupSub"></p>
+
+    <!-- Step 1: API key -->
+    <section class="step" data-step="0">
+      <label>Gemini API key</label>
+      <input id="su-key" type="password" placeholder="Paste your Gemini API key" />
+      <p class="hint" style="margin-top:8px">Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">aistudio.google.com/apikey</a>. Used only for your runs.</p>
+    </section>
+
+    <!-- Step 2: Resume -->
+    <section class="step" data-step="1" hidden>
+      <label>Paste your resume (plain text)</label>
+      <textarea id="su-resume" rows="11" placeholder="Open your resume, select all, copy, and paste it here..."></textarea>
+      <p class="hint" style="margin-top:8px">Plain text works best — the AI rewrites this for each job. Paste from a PDF or Word doc.</p>
+    </section>
+
+    <!-- Step 3: Profile -->
+    <section class="step" data-step="2" hidden>
+      <div class="form-grid">
+        <div><label>Full name *</label><input id="su-name" /></div>
+        <div><label>Email *</label><input id="su-email" type="email" /></div>
+        <div><label>Phone</label><input id="su-phone" /></div>
+        <div><label>City</label><input id="su-city" /></div>
+        <div><label>State / Province</label><input id="su-state" /></div>
+        <div><label>Country</label><input id="su-country" /></div>
+        <div><label>Postal code</label><input id="su-postal" /></div>
+        <div><label>LinkedIn URL</label><input id="su-linkedin" /></div>
+        <div><label>GitHub URL</label><input id="su-github" /></div>
+        <div class="full"><label>Portfolio URL</label><input id="su-portfolio" /></div>
+
+        <div class="sub-h">Experience</div>
+        <div><label>Current title</label><input id="su-cur-title" /></div>
+        <div><label>Target role *</label><input id="su-target" /></div>
+        <div><label>Years of experience</label><input id="su-years" /></div>
+        <div><label>Education level</label><input id="su-edu" placeholder="e.g. Bachelor's" /></div>
+        <div class="full"><label>School / University name</label><input id="su-school" /></div>
+
+        <div class="sub-h">Skills (comma separated)</div>
+        <div class="full"><label>Languages</label><input id="su-langs" placeholder="Python, JavaScript, ..." /></div>
+        <div class="full"><label>Frameworks</label><input id="su-fw" placeholder="React, Next.js, ..." /></div>
+        <div class="full"><label>Tools</label><input id="su-tools" placeholder="Git, AWS, Docker, ..." /></div>
+
+        <div class="sub-h">Keep on resume (optional, comma separated)</div>
+        <div><label>Companies</label><input id="su-companies" /></div>
+        <div><label>Projects</label><input id="su-projects" /></div>
+
+        <div class="sub-h">Work &amp; pay</div>
+        <div class="full check"><input id="su-auth" type="checkbox" checked /> <label style="margin:0">Authorized to work in target country</label></div>
+        <div class="full check"><input id="su-spons" type="checkbox" /> <label style="margin:0">Will need visa sponsorship</label></div>
+        <div><label>Salary currency</label><input id="su-cur" value="USD" /></div>
+        <div><label>Min salary</label><input id="su-smin" /></div>
+        <div><label>Max salary</label><input id="su-smax" /></div>
+      </div>
+    </section>
+
+    <!-- Step 4: Searches -->
+    <section class="step" data-step="3" hidden>
+      <label>Job titles to search (comma separated) *</label>
+      <input id="su-titles" placeholder="Full Stack Developer, Backend Engineer, ..." />
+      <div class="form-grid" style="margin-top:12px">
+        <div><label>Location</label><input id="su-loc" value="Remote" /></div>
+        <div><label>Search radius (miles, 0 = remote)</label><input id="su-distance" type="number" min="0" value="0" /></div>
+        <div><label>Only jobs newer than (hours)</label><input id="su-hours" type="number" min="1" value="72" /></div>
+        <div class="check" style="align-items:flex-end; padding-bottom:8px"><input id="su-remote" type="checkbox" checked /> <label style="margin:0">Remote only</label></div>
+      </div>
+    </section>
+
+    <div class="setup-foot">
+      <button class="secondary" id="su-back">Back</button>
+      <div class="row" style="gap:10px">
+        <span class="hint" id="su-err" style="color:var(--danger)"></span>
+        <button id="su-next">Next</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Settings modal -->
+<div class="overlay" id="settingsModal">
+  <div class="modal">
+    <div class="modal-head">
+      <h3>Gemini API key</h3>
+      <button class="iconbtn" id="closeSettings" aria-label="Close" style="border:0">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="field">
+      <input id="apiKey" type="password" placeholder="Paste your Gemini API key" />
+    </div>
+    <div class="row" style="justify-content:flex-end; margin-top:14px">
+      <button id="saveKey">Save</button>
+    </div>
+    <p class="ok-note" id="keyOk">Saved.</p>
+    <hr style="border:0; border-top:1px solid var(--border); margin:18px 0" />
+    <button class="secondary" id="editSetup" style="width:100%">Edit profile, resume &amp; searches</button>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const api = (p, opts) => fetch(p, opts).then(r => r.json());
+
+// ── Theme ─────────────────────────────────────────────────────────
+const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>';
+const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+function curTheme() { return document.documentElement.getAttribute("data-theme") || "light"; }
+function paintThemeIcon() { $("themeToggle").innerHTML = curTheme() === "dark" ? SUN : MOON; }
+function toggleTheme() {
+  const next = curTheme() === "dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  localStorage.setItem("theme", next);
+  paintThemeIcon();
+}
+// Follow the system if the user hasn't picked an explicit override.
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
+  if (!localStorage.getItem("theme")) {
+    document.documentElement.setAttribute("data-theme", e.matches ? "dark" : "light");
+    paintThemeIcon();
+  }
+});
+$("themeToggle").onclick = toggleTheme;
+paintThemeIcon();
+
+// ── Settings modal ────────────────────────────────────────────────
+function openSettings() { $("settingsModal").classList.add("show"); $("keyOk").style.display = "none"; $("apiKey").focus(); }
+function closeSettings() { $("settingsModal").classList.remove("show"); }
+$("settingsBtn").onclick = openSettings;
+$("closeSettings").onclick = closeSettings;
+$("settingsModal").onclick = (e) => { if (e.target === $("settingsModal")) closeSettings(); };
+
+// ── Live event stream ─────────────────────────────────────────────
+function fmtTime(iso) { try { return new Date(iso).toLocaleTimeString([], {hour12:false}); } catch { return ""; } }
+function evClass(type) {
+  if (type.endsWith("complete")) return "dot-complete";
+  if (type.startsWith("quota")) return "dot-quota";
+  if (type.includes("rate_limited") || type.includes("timeout")) return "dot-rate";
+  if (type.includes("error")) return "dot-error";
+  if (type.startsWith("stage") || type.startsWith("run")) return "dot-stage";
+  return "";
+}
+let feedCleared = false;
+const feed = $("feed");
+function showRunning(on) { $("nowRunning").style.display = on ? "flex" : "none"; }
+function pushEvent(ev) {
+  if (ev.type === "run.tick") {
+    showRunning(true);
+    if (ev.data && ev.data.elapsed != null) $("nowTime").textContent = ev.data.elapsed + "s";
+    return;
+  }
+  if (ev.type === "run.start" || ev.type === "run.mode") { showRunning(true); setRunPill("running"); }
+  if (!feedCleared) { feed.innerHTML = ""; feedCleared = true; }
+  const el = document.createElement("div");
+  el.className = "ev " + evClass(ev.type);
+  el.innerHTML = `<span class="t">${fmtTime(ev.timestamp)}</span><span class="msg"></span>`;
+  el.querySelector(".msg").textContent = ev.message || ev.type;
+  feed.appendChild(el);
+  feed.scrollTop = feed.scrollHeight;
+  if (ev.message && !/^run\.(start|complete|error)$/.test(ev.type)) $("nowMsg").textContent = ev.message;
+  if (/(complete|scored|tailored|cover_done|stage\.done|run\.complete|perjob\.empty)/.test(ev.type)) {
+    refreshStats(); refreshJobs();
+  }
+  if (ev.type === "run.complete" || ev.type === "run.error") {
+    showRunning(false);
+    setRunPill(ev.type === "run.error" ? "error" : "done");
+  }
+}
+function connectStream() {
+  const es = new EventSource("/api/events");
+  es.onmessage = (e) => { try { pushEvent(JSON.parse(e.data)); } catch {} };
+  es.onerror = () => {};
+}
+
+// ── Status / stats / jobs ─────────────────────────────────────────
+function setRunPill(state) {
+  const p = $("runPill");
+  p.textContent = state;
+  p.className = "pill " + (state === "running" ? "bad" : state === "done" ? "ok" : "");
+  const running = state === "running";
+  $("runBtn").disabled = running;
+  $("stopBtn").style.display = running ? "inline-block" : "none";
+}
+async function refreshStatus() {
+  const s = await api("/api/status");
+  const ready = s.has_api_key && s.has_profile && s.has_resume;
+  const pill = $("setupPill");
+  if (ready) {
+    pill.style.display = "none";
+  } else {
+    pill.style.display = "";
+    pill.textContent = !s.has_api_key ? "Add API key" : "Setup incomplete";
+    pill.className = "pill bad";
+  }
+  // Nudge: red dot on the gear when no key is set yet.
+  $("keyDot").style.display = s.has_api_key ? "none" : "block";
+  if (s.run && s.run.status) setRunPill(s.run.status);
+}
+async function refreshSettings() {
+  const s = await api("/api/settings");
+  $("keyDot").style.display = s.has_api_key ? "none" : "block";
+}
+async function refreshStats() {
+  const s = await api("/api/stats");
+  $("st-total").textContent = s.total ?? 0;
+  $("st-scored").textContent = s.scored ?? 0;
+  $("st-tailored").textContent = s.tailored ?? 0;
+  $("st-ready").textContent = s.ready_to_apply ?? 0;
+}
+async function refreshJobs() {
+  const { jobs } = await api("/api/jobs?min_score=0&limit=50");
+  const wrap = $("jobsWrap");
+  if (!jobs || !jobs.length) { wrap.innerHTML = '<div class="empty">No jobs yet — start a run to find some.</div>'; return; }
+  const rows = jobs.map(j => {
+    const sc = j.score == null ? "–" : j.score;
+    const cls = j.score >= 7 ? "s-hi" : j.score >= 5 ? "s-mid" : "s-lo";
+    const dl = j.resume_path ? `<a href="/api/download?path=${encodeURIComponent(j.resume_path)}">resume</a>` : "";
+    const cl = j.cover_path ? ` · <a href="/api/download?path=${encodeURIComponent(j.cover_path)}">cover</a>` : "";
+    const files = (dl || cl) ? `${dl}${cl}` : '<span class="hint">—</span>';
+    const applyHref = goodUrl(j.apply_url) || goodUrl(j.url);
+    const apply = applyHref
+      ? `<a class="apply-link" href="${escapeHtml(applyHref)}" target="_blank" rel="noopener noreferrer">Apply ↗</a>`
+      : `<span class="hint">no link</span>`;
+    const titleUrl = goodUrl(j.url);
+    const titleHtml = titleUrl
+      ? `<a href="${escapeHtml(titleUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(j.title || "")}</a>`
+      : escapeHtml(j.title || "");
+    const company = j.company ? `<span class="chip">${escapeHtml(j.company)}</span>` : "";
+    const badgeCls = (j.status === "ready" || j.status === "applied") ? "badge b-" + j.status : "badge";
+    return `<tr>
+      <td><span class="score-pill ${cls}">${sc}</span></td>
+      <td class="title-cell">${titleHtml}</td>
+      <td>${company}</td>
+      <td><span class="${badgeCls}">${escapeHtml(j.status || "")}</span></td>
+      <td class="files">${files}</td>
+      <td>${apply}</td>
+    </tr>`;
+  }).join("");
+  wrap.innerHTML = `<table><thead><tr><th>Fit</th><th>Title</th><th>Company</th><th>Status</th><th>Files</th><th>Apply</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+function escapeHtml(s){ const d=document.createElement("div"); d.textContent=s; return d.innerHTML; }
+function goodUrl(u){
+  if (!u) return null;
+  const s = String(u).trim();
+  if (["none","null","n/a",""].includes(s.toLowerCase())) return null;
+  return /^https?:\/\//i.test(s) ? s : null;
+}
+
+// ── Actions ───────────────────────────────────────────────────────
+$("runBtn").onclick = async () => {
+  setRunPill("running");
+  const stages = $("stages").value.split(",");
+  const body = {
+    stages,
+    max_jobs: parseInt($("maxJobs").value || "0", 10),
+    min_score: parseInt($("minScore").value || "7", 10),
+    frugal: $("frugal").checked ? true : false,
+  };
+  const res = await api("/api/run", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
+  if (!res.ok) { setRunPill("idle"); alert(res.error || "Could not start run."); }
+};
+$("resetBtn").onclick = async () => {
+  if (!confirm("Delete ALL saved jobs from your local database and start fresh?\n\nThis cannot be undone.")) return;
+  const res = await api("/api/reset", { method: "POST" });
+  if (res.ok) {
+    feedCleared = false;
+    $("feed").innerHTML = '<div class="empty">Cleared. Start a run to watch every step happen live.</div>';
+    refreshStats(); refreshJobs();
+  } else {
+    alert(res.error || "Could not reset.");
+  }
+};
+$("stopBtn").onclick = async () => {
+  $("stopBtn").disabled = true;
+  $("nowMsg").textContent = "Stopping…";
+  try { await api("/api/stop", { method: "POST" }); } catch {}
+  setTimeout(() => { $("stopBtn").disabled = false; }, 2000);
+};
+$("saveKey").onclick = async () => {
+  const key = $("apiKey").value.trim();
+  if (!key) { closeSettings(); return; }
+  const res = await api("/api/settings", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ provider: "gemini", api_key: key }),
+  });
+  if (res.ok) {
+    $("apiKey").value = "";
+    $("keyOk").style.display = "block";
+    refreshStatus();
+    setTimeout(closeSettings, 700);
+  } else {
+    alert(res.error || "Could not save key.");
+  }
+};
+
+// ── Setup wizard ──────────────────────────────────────────────────
+let suStep = 0;
+const SU_STEPS = 4;
+const SU_TITLES = ["Connect Gemini", "Your resume", "Your profile", "What to search"];
+const SU_SUBS = [
+  "Add your free Gemini API key — it powers scoring, tailoring, and cover letters.",
+  "Paste your resume text. This is what the AI tailors for each job.",
+  "Tell us about you. Used for your resume, cover letters, and application forms.",
+  "Pick the roles and locations to search for.",
+];
+const splitList = (s) => (s || "").split(",").map(x => x.trim()).filter(Boolean);
+
+function renderDots() {
+  const d = $("stepDots"); d.innerHTML = "";
+  for (let i = 0; i < SU_STEPS; i++) {
+    const s = document.createElement("span");
+    s.className = "dot" + (i === suStep ? " on" : i < suStep ? " done" : "");
+    d.appendChild(s);
+  }
+}
+function showStep(n) {
+  suStep = n;
+  document.querySelectorAll("#setup .step").forEach(el => { el.hidden = (+el.dataset.step !== n); });
+  $("setupTitle").textContent = SU_TITLES[n];
+  $("setupSub").textContent = SU_SUBS[n];
+  $("su-back").style.visibility = n === 0 ? "hidden" : "visible";
+  $("su-next").textContent = n === SU_STEPS - 1 ? "Finish" : "Next";
+  $("su-err").textContent = "";
+  renderDots();
+}
+function prefillProfile(p) {
+  const P = p.personal || {}, W = p.work_authorization || {}, C = p.compensation || {},
+        E = p.experience || {}, S = p.skills_boundary || {}, R = p.resume_facts || {};
+  $("su-name").value = P.full_name || ""; $("su-email").value = P.email || ""; $("su-phone").value = P.phone || "";
+  $("su-city").value = P.city || ""; $("su-state").value = P.province_state || ""; $("su-country").value = P.country || ""; $("su-postal").value = P.postal_code || "";
+  $("su-linkedin").value = P.linkedin_url || ""; $("su-github").value = P.github_url || ""; $("su-portfolio").value = P.portfolio_url || "";
+  $("su-auth").checked = W.legally_authorized_to_work !== false; $("su-spons").checked = !!W.require_sponsorship;
+  $("su-cur").value = C.salary_currency || "USD"; $("su-smin").value = C.salary_range_min || ""; $("su-smax").value = C.salary_range_max || "";
+  $("su-years").value = E.years_of_experience_total || ""; $("su-edu").value = E.education_level || ""; $("su-cur-title").value = E.current_title || ""; $("su-target").value = E.target_role || "";
+  $("su-langs").value = (S.programming_languages || []).join(", "); $("su-fw").value = (S.frameworks || []).join(", "); $("su-tools").value = (S.tools || []).join(", ");
+  $("su-companies").value = (R.preserved_companies || []).join(", "); $("su-projects").value = (R.preserved_projects || []).join(", "); $("su-school").value = R.preserved_school || "";
+}
+function gatherProfile() {
+  return {
+    personal: {
+      full_name: $("su-name").value.trim(), email: $("su-email").value.trim(), phone: $("su-phone").value.trim(),
+      city: $("su-city").value.trim(), province_state: $("su-state").value.trim(), country: $("su-country").value.trim(),
+      postal_code: $("su-postal").value.trim(), linkedin_url: $("su-linkedin").value.trim(),
+      github_url: $("su-github").value.trim(), portfolio_url: $("su-portfolio").value.trim(),
+    },
+    work_authorization: { legally_authorized_to_work: $("su-auth").checked, require_sponsorship: $("su-spons").checked, work_permit_type: "" },
+    compensation: { salary_expectation: "", salary_currency: $("su-cur").value.trim() || "USD", salary_range_min: $("su-smin").value.trim(), salary_range_max: $("su-smax").value.trim() },
+    experience: { years_of_experience_total: $("su-years").value.trim(), education_level: $("su-edu").value.trim(), current_title: $("su-cur-title").value.trim(), target_role: $("su-target").value.trim() },
+    skills_boundary: { programming_languages: splitList($("su-langs").value), frameworks: splitList($("su-fw").value), tools: splitList($("su-tools").value) },
+    resume_facts: { preserved_companies: splitList($("su-companies").value), preserved_projects: splitList($("su-projects").value), preserved_school: $("su-school").value.trim(), real_metrics: [] },
+  };
+}
+async function openSetup() {
+  try {
+    const [p, r, sc] = await Promise.all([api("/api/profile"), api("/api/resume"), api("/api/searches")]);
+    if (r.text) $("su-resume").value = r.text;
+    if (sc) {
+      $("su-titles").value = (sc.titles || []).join(", ");
+      $("su-loc").value = sc.location || "Remote";
+      $("su-remote").checked = !!sc.remote;
+      $("su-hours").value = sc.hours_old || 72;
+      $("su-distance").value = sc.distance || 0;
+    }
+    if (p.profile) prefillProfile(p.profile);
+  } catch {}
+  $("setup").classList.add("show");
+  showStep(0);
+}
+function closeSetup() { $("setup").classList.remove("show"); }
+async function suSaveStep() {
+  $("su-err").textContent = "";
+  if (suStep === 0) {
+    const k = $("su-key").value.trim();
+    if (k) {
+      const r = await api("/api/settings", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ provider: "gemini", api_key: k }) });
+      if (!r.ok) { $("su-err").textContent = r.error || "Could not save key."; return false; }
+      $("su-key").value = "";
+    }
+    return true;
+  }
+  if (suStep === 1) {
+    const t = $("su-resume").value.trim();
+    if (t.length < 50) { $("su-err").textContent = "Paste your full resume text."; return false; }
+    const r = await api("/api/resume", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ text: t }) });
+    if (!r.ok) { $("su-err").textContent = r.error || "Could not save resume."; return false; }
+    return true;
+  }
+  if (suStep === 2) {
+    const prof = gatherProfile();
+    if (!prof.personal.full_name) { $("su-err").textContent = "Full name is required."; return false; }
+    if (!prof.personal.email) { $("su-err").textContent = "Email is required."; return false; }
+    const r = await api("/api/profile", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(prof) });
+    if (!r.ok) { $("su-err").textContent = r.error || "Could not save profile."; return false; }
+    return true;
+  }
+  if (suStep === 3) {
+    const titles = splitList($("su-titles").value);
+    if (!titles.length) { $("su-err").textContent = "Add at least one job title."; return false; }
+    const body = { titles, location: $("su-loc").value.trim() || "Remote", remote: $("su-remote").checked, distance: parseInt($("su-distance").value || "0", 10), hours_old: parseInt($("su-hours").value || "72", 10) };
+    const r = await api("/api/searches", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
+    if (!r.ok) { $("su-err").textContent = r.error || "Could not save searches."; return false; }
+    return true;
+  }
+  return true;
+}
+$("su-next").onclick = async () => {
+  $("su-next").disabled = true;
+  const ok = await suSaveStep();
+  $("su-next").disabled = false;
+  if (!ok) return;
+  if (suStep < SU_STEPS - 1) { showStep(suStep + 1); }
+  else { closeSetup(); await refreshStatus(); refreshSettings(); refreshStats(); refreshJobs(); }
+};
+$("su-back").onclick = () => { if (suStep > 0) showStep(suStep - 1); };
+$("closeSetup").onclick = closeSetup;
+$("setup").onclick = (e) => { if (e.target === $("setup")) closeSetup(); };
+$("editSetup").onclick = () => { closeSettings(); openSetup(); };
+
+// ── Boot ──────────────────────────────────────────────────────────
+connectStream();
+refreshStatus(); refreshSettings(); refreshStats(); refreshJobs();
+setInterval(refreshStatus, 5000);
+// First run: if anything isn't set up yet, open the in-browser setup wizard.
+api("/api/status").then(s => {
+  if (!(s.has_api_key && s.has_profile && s.has_resume)) openSetup();
+}).catch(() => {});
+</script>
+</body>
+</html>

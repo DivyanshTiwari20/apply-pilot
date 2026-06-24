@@ -35,8 +35,19 @@ VALID_STAGES = ("discover", "enrich", "score", "tailor", "cover", "pdf")
 
 def _bootstrap() -> None:
     """Common setup: load env, create dirs, init DB."""
+    import sys
+
     from applypilot.config import load_env, ensure_dirs
     from applypilot.database import init_db
+
+    # Make console output Unicode-safe so a stray character (e.g. an arrow in a
+    # log line, or a non-cp1252 char in a job title) can't crash a run on
+    # Windows terminals. Replace unencodable chars instead of raising.
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(errors="replace")  # type: ignore[union-attr]
+        except Exception:
+            pass
 
     load_env()
     ensure_dirs()
@@ -87,6 +98,14 @@ def run(
     workers: int = typer.Option(1, "--workers", "-w", help="Parallel threads for discovery/enrichment stages."),
     stream: bool = typer.Option(False, "--stream", help="Run stages concurrently (streaming mode)."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview stages without executing."),
+    max_jobs: int = typer.Option(
+        0,
+        "--max-jobs",
+        help=(
+            "Max jobs to process through LLM stages (score/tailor/cover) per run. "
+            "0 = unlimited. Recommended: 5-20 on Gemini Flash-Lite free tier."
+        ),
+    ),
     validation: str = typer.Option(
         "normal",
         "--validation",
@@ -95,6 +114,15 @@ def run(
             "strict: banned words = errors, judge must pass. "
             "normal: banned words = warnings only (default, recommended for Gemini free tier). "
             "lenient: banned words ignored, LLM judge skipped (fastest, fewest API calls)."
+        ),
+    ),
+    frugal: Optional[bool] = typer.Option(
+        None,
+        "--frugal/--no-frugal",
+        help=(
+            "Free-tier mode: process jobs depth-first (finish a few completely) "
+            "and pace/cap API calls so you always get results before the quota runs "
+            "out. Auto-enabled on Gemini free tier; use --no-frugal to force batch mode."
         ),
     ),
 ) -> None:
@@ -136,6 +164,8 @@ def run(
         stream=stream,
         workers=workers,
         validation_mode=validation,
+        max_jobs=max_jobs,
+        frugal=frugal,
     )
 
     if result.get("errors"):
@@ -143,28 +173,47 @@ def run(
 
 
 @app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind."),
+    port: int = typer.Option(8000, "--port", "-p", help="Port to bind."),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Don't auto-open the browser."),
+) -> None:
+    """Launch the local web app (browser UI) for ApplyPilot."""
+    _bootstrap()
+
+    try:
+        import uvicorn  # noqa: F401
+        from applypilot.webapp.server import app as web_app  # noqa: F401
+    except SystemExit:
+        raise
+    except ImportError:
+        console.print(
+            '[red]The web app needs extra packages.[/red] Install them with:\n'
+            '    [bold]pip install -e ".[web]"[/bold]'
+        )
+        raise typer.Exit(code=1)
+
+    url = f"http://{host}:{port}"
+    console.print(f"[green]ApplyPilot web app:[/green] [bold]{url}[/bold]  (Ctrl+C to stop)")
+
+    if not no_browser:
+        import threading
+        import webbrowser
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+
+    import uvicorn
+    uvicorn.run("applypilot.webapp.server:app", host=host, port=port, log_level="info")
+
+
+@app.command()
 def apply(
-    limit: Optional[int] = typer.Option(None, "--limit", "-l", help="Max applications to submit."),
-    workers: int = typer.Option(1, "--workers", "-w", help="Number of parallel browser workers."),
-    min_score: int = typer.Option(7, "--min-score", help="Minimum fit score for job selection."),
-    model: str = typer.Option("haiku", "--model", "-m", help="Claude model name."),
-    continuous: bool = typer.Option(False, "--continuous", "-c", help="Run forever, polling for new jobs."),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview actions without submitting."),
-    headless: bool = typer.Option(False, "--headless", help="Run browsers in headless mode."),
-    url: Optional[str] = typer.Option(None, "--url", help="Apply to a specific job URL."),
-    gen: bool = typer.Option(False, "--gen", help="Generate prompt file for manual debugging instead of running."),
     mark_applied: Optional[str] = typer.Option(None, "--mark-applied", help="Manually mark a job URL as applied."),
     mark_failed: Optional[str] = typer.Option(None, "--mark-failed", help="Manually mark a job URL as failed (provide URL)."),
     fail_reason: Optional[str] = typer.Option(None, "--fail-reason", help="Reason for --mark-failed."),
     reset_failed: bool = typer.Option(False, "--reset-failed", help="Reset all failed jobs for retry."),
 ) -> None:
-    """Launch auto-apply to submit job applications."""
+    """Manually mark job application status (auto-apply removed)."""
     _bootstrap()
-
-    from applypilot.config import check_tier, PROFILE_PATH as _profile_path
-    from applypilot.database import get_connection
-
-    # --- Utility modes (no Chrome/Claude needed) ---
 
     if mark_applied:
         from applypilot.apply.launcher import mark_job
@@ -184,108 +233,72 @@ def apply(
         console.print(f"[green]Reset {count} failed job(s) for retry.[/green]")
         return
 
-    # --- Full apply mode ---
-
-    # Check 1: Tier 3 required (Claude Code CLI + Chrome)
-    check_tier(3, "auto-apply")
-
-    # Check 2: Profile exists
-    if not _profile_path.exists():
-        console.print(
-            "[red]Profile not found.[/red]\n"
-            "Run [bold]applypilot init[/bold] to create your profile first."
-        )
-        raise typer.Exit(code=1)
-
-    # Check 3: Tailored resumes exist (skip for --gen with --url)
-    if not (gen and url):
-        conn = get_connection()
-        ready = conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE tailored_resume_path IS NOT NULL AND applied_at IS NULL"
-        ).fetchone()[0]
-        if ready == 0:
-            console.print(
-                "[red]No tailored resumes ready.[/red]\n"
-                "Run [bold]applypilot run score tailor[/bold] first to prepare applications."
-            )
-            raise typer.Exit(code=1)
-
-    if gen:
-        from applypilot.apply.launcher import gen_prompt, BASE_CDP_PORT
-        target = url or ""
-        if not target:
-            console.print("[red]--gen requires --url to specify which job.[/red]")
-            raise typer.Exit(code=1)
-        prompt_file = gen_prompt(target, min_score=min_score, model=model)
-        if not prompt_file:
-            console.print("[red]No matching job found for that URL.[/red]")
-            raise typer.Exit(code=1)
-        mcp_path = _profile_path.parent / ".mcp-apply-0.json"
-        console.print(f"[green]Wrote prompt to:[/green] {prompt_file}")
-        console.print(f"\n[bold]Run manually:[/bold]")
-        console.print(
-            f"  claude --model {model} -p "
-            f"--mcp-config {mcp_path} "
-            f"--permission-mode bypassPermissions < {prompt_file}"
-        )
-        return
-
-    from applypilot.apply.launcher import main as apply_main
-
-    effective_limit = limit if limit is not None else (0 if continuous else 1)
-
-    console.print("\n[bold blue]Launching Auto-Apply[/bold blue]")
-    console.print(f"  Limit:    {'unlimited' if continuous else effective_limit}")
-    console.print(f"  Workers:  {workers}")
-    console.print(f"  Model:    {model}")
-    console.print(f"  Headless: {headless}")
-    console.print(f"  Dry run:  {dry_run}")
-    if url:
-        console.print(f"  Target:   {url}")
-    console.print()
-
-    apply_main(
-        limit=effective_limit,
-        target_url=url,
-        min_score=min_score,
-        headless=headless,
-        model=model,
-        dry_run=dry_run,
-        continuous=continuous,
-        workers=workers,
+    console.print(
+        "[yellow]Auto-apply is disabled in this build.[/yellow]\n\n"
+        "After running [bold]applypilot run[/bold], your tailored resumes and cover letters\n"
+        "are saved in [bold]~/.applypilot/tailored_resumes/[/bold] and [bold]~/.applypilot/cover_letters/[/bold].\n\n"
+        "Use [bold]applypilot apply --mark-applied URL[/bold] to track manual applications.\n"
+        "Use [bold]applypilot dashboard[/bold] to view your job pipeline."
     )
 
 
 @app.command()
 def status() -> None:
-    """Show pipeline statistics from the database."""
+    """Show pipeline statistics and ready-to-apply jobs from the database."""
     _bootstrap()
 
-    from applypilot.database import get_stats
+    from applypilot.database import get_stats, get_connection
 
     stats = get_stats()
+    conn = get_connection()
 
     console.print("\n[bold]ApplyPilot Pipeline Status[/bold]\n")
 
-    # Summary table
-    summary = Table(title="Pipeline Overview", show_header=True, header_style="bold cyan")
-    summary.add_column("Metric", style="bold")
-    summary.add_column("Count", justify="right")
+    # Pipeline funnel — shows each stage as a step with counts
+    funnel = Table(title="Pipeline Funnel", show_header=True, header_style="bold cyan")
+    funnel.add_column("Stage", style="bold")
+    funnel.add_column("Done", justify="right")
+    funnel.add_column("Pending", justify="right")
+    funnel.add_column("Status")
 
-    summary.add_row("Total jobs discovered", str(stats["total"]))
-    summary.add_row("With full description", str(stats["with_description"]))
-    summary.add_row("Pending enrichment", str(stats["pending_detail"]))
-    summary.add_row("Enrichment errors", str(stats["detail_errors"]))
-    summary.add_row("Scored by LLM", str(stats["scored"]))
-    summary.add_row("Pending scoring", str(stats["unscored"]))
-    summary.add_row("Tailored resumes", str(stats["tailored"]))
-    summary.add_row("Pending tailoring (7+)", str(stats["untailored_eligible"]))
-    summary.add_row("Cover letters", str(stats["with_cover_letter"]))
-    summary.add_row("Ready to apply", str(stats["ready_to_apply"]))
-    summary.add_row("Applied", str(stats["applied"]))
-    summary.add_row("Apply errors", str(stats["apply_errors"]))
+    def _bar(done: int, total: int) -> str:
+        if total == 0:
+            return "[dim]no data[/dim]"
+        pct = done / total
+        filled = int(pct * 20)
+        color = "green" if pct >= 0.8 else "yellow" if pct >= 0.4 else "red"
+        return f"[{color}]{'█' * filled}{'░' * (20 - filled)}[/{color}] {pct:.0%}"
 
-    console.print(summary)
+    total = stats["total"]
+    funnel.add_row(
+        "Discover", str(total), "—",
+        "[green]complete[/green]" if total > 0 else "[dim]no jobs yet[/dim]",
+    )
+    funnel.add_row(
+        "Enrich", str(stats["with_description"]), str(stats["pending_detail"]),
+        _bar(stats["with_description"], total),
+    )
+    funnel.add_row(
+        "Score", str(stats["scored"]), str(stats["unscored"]),
+        _bar(stats["scored"], stats["with_description"]) if stats["with_description"] else "[dim]—[/dim]",
+    )
+    funnel.add_row(
+        "Tailor", str(stats["tailored"]), str(stats["untailored_eligible"]),
+        _bar(stats["tailored"], stats["scored"]) if stats["scored"] else "[dim]—[/dim]",
+    )
+    funnel.add_row(
+        "Cover letter", str(stats["with_cover_letter"]), "—",
+        _bar(stats["with_cover_letter"], stats["tailored"]) if stats["tailored"] else "[dim]—[/dim]",
+    )
+    funnel.add_row(
+        "Ready to apply", str(stats["ready_to_apply"]), "—",
+        "[green]all set[/green]" if stats["ready_to_apply"] > 0 else "[dim]none yet[/dim]",
+    )
+    funnel.add_row(
+        "Applied", str(stats["applied"]), "—",
+        f"[dim]{stats['apply_errors']} errors[/dim]" if stats["apply_errors"] else "[dim]—[/dim]",
+    )
+    console.print(funnel)
 
     # Score distribution
     if stats["score_distribution"]:
@@ -308,6 +321,43 @@ def status() -> None:
 
         console.print(dist_table)
 
+    # Jobs with tailored resumes + cover letters (ready to apply)
+    ready_jobs = conn.execute(
+        "SELECT title, site, fit_score, application_url, cover_letter_path "
+        "FROM jobs WHERE tailored_resume_path IS NOT NULL "
+        "AND cover_letter_path IS NOT NULL "
+        "ORDER BY fit_score DESC LIMIT 30"
+    ).fetchall()
+
+    if ready_jobs:
+        ready_table = Table(
+            title="\nFully Processed Jobs (tailored resume + cover letter ready)",
+            show_header=True, header_style="bold green",
+        )
+        ready_table.add_column("#", justify="right", style="dim")
+        ready_table.add_column("Title")
+        ready_table.add_column("Company")
+        ready_table.add_column("Score", justify="center")
+        ready_table.add_column("Apply URL")
+
+        for i, row in enumerate(ready_jobs, 1):
+            score = row[2]
+            score_color = "green" if score >= 7 else "yellow" if score >= 5 else "red"
+            url = (row[3] or "—")[:60]
+            ready_table.add_row(
+                str(i),
+                (row[0] or "?")[:40],
+                (row[1] or "?")[:20],
+                f"[{score_color}]{score}[/{score_color}]",
+                url,
+            )
+
+        console.print(ready_table)
+        console.print(
+            "\n  [dim]Run [bold]applypilot export[/bold] to save these to a file "
+            "with resume/cover letter paths.[/dim]"
+        )
+
     # By site
     if stats["by_site"]:
         site_table = Table(title="\nJobs by Source", show_header=True, header_style="bold magenta")
@@ -320,6 +370,87 @@ def status() -> None:
         console.print(site_table)
 
     console.print()
+
+
+@app.command()
+def export(
+    output: Optional[str] = typer.Option(
+        None, "--output", "-o",
+        help="Output file path. Defaults to ~/.applypilot/ready_to_apply.csv",
+    ),
+    min_score: int = typer.Option(0, "--min-score", help="Only export jobs with this score or higher."),
+) -> None:
+    """Export fully processed jobs (tailored resume + cover letter) to a CSV file."""
+    _bootstrap()
+
+    import csv
+    from applypilot.config import APP_DIR
+    from applypilot.database import get_connection
+
+    conn = get_connection()
+
+    query = (
+        "SELECT title, site, fit_score, application_url, url, "
+        "tailored_resume_path, cover_letter_path, tailored_at "
+        "FROM jobs WHERE tailored_resume_path IS NOT NULL "
+        "AND cover_letter_path IS NOT NULL"
+    )
+    params: list = []
+    if min_score > 0:
+        query += " AND fit_score >= ?"
+        params.append(min_score)
+    query += " ORDER BY fit_score DESC, tailored_at DESC"
+
+    rows = conn.execute(query, params).fetchall()
+
+    if not rows:
+        console.print(
+            "[yellow]No fully processed jobs found.[/yellow]\n"
+            "Run [bold]applypilot run score tailor cover[/bold] first."
+        )
+        raise typer.Exit()
+
+    out_path = output or str(APP_DIR / "ready_to_apply.csv")
+
+    with open(out_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["#", "Title", "Company", "Score", "Apply URL", "Job URL",
+                         "Resume Path", "Cover Letter Path", "Processed At"])
+        for i, row in enumerate(rows, 1):
+            writer.writerow([i] + list(row))
+
+    # Print summary table
+    summary = Table(
+        title=f"Exported {len(rows)} jobs → {out_path}",
+        show_header=True, header_style="bold green",
+    )
+    summary.add_column("#", justify="right", style="dim")
+    summary.add_column("Title")
+    summary.add_column("Company")
+    summary.add_column("Score", justify="center")
+    summary.add_column("Apply URL")
+
+    for i, row in enumerate(rows[:25], 1):
+        score = row[2]
+        score_color = "green" if score and score >= 7 else "yellow" if score and score >= 5 else "red"
+        url = (row[3] or "—")[:55]
+        summary.add_row(
+            str(i),
+            (row[0] or "?")[:40],
+            (row[1] or "?")[:20],
+            f"[{score_color}]{score}[/{score_color}]" if score else "—",
+            url,
+        )
+
+    if len(rows) > 25:
+        summary.add_row("...", f"(+{len(rows) - 25} more in file)", "", "", "")
+
+    console.print()
+    console.print(summary)
+    console.print(f"\n  [bold]Saved to:[/bold] {out_path}")
+    console.print(
+        "  Open the CSV to see resume and cover letter file paths for each job.\n"
+    )
 
 
 @app.command()
@@ -338,7 +469,7 @@ def doctor() -> None:
     import shutil
     from applypilot.config import (
         load_env, PROFILE_PATH, RESUME_PATH, RESUME_PDF_PATH,
-        SEARCH_CONFIG_PATH, ENV_PATH, get_chrome_path,
+        SEARCH_CONFIG_PATH, get_chrome_path,
     )
 
     load_env()
@@ -384,7 +515,7 @@ def doctor() -> None:
     has_openai = bool(os.environ.get("OPENAI_API_KEY"))
     has_local = bool(os.environ.get("LLM_URL"))
     if has_gemini:
-        model = os.environ.get("LLM_MODEL", "gemini-2.0-flash")
+        model = os.environ.get("LLM_MODEL", "gemini-3.1-flash-lite")
         results.append(("LLM API key", ok_mark, f"Gemini ({model})"))
     elif has_openai:
         model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
@@ -395,30 +526,30 @@ def doctor() -> None:
         results.append(("LLM API key", fail_mark,
                         "Set GEMINI_API_KEY in ~/.applypilot/.env (run 'applypilot init')"))
 
-    # --- Tier 3 checks ---
+    # --- Tier 3 checks (optional — auto-apply disabled) ---
     # Claude Code CLI
     claude_bin = shutil.which("claude")
     if claude_bin:
         results.append(("Claude Code CLI", ok_mark, claude_bin))
     else:
-        results.append(("Claude Code CLI", fail_mark,
-                        "Install from https://claude.ai/code (needed for auto-apply)"))
+        results.append(("Claude Code CLI", "[dim]optional[/dim]",
+                        "Auto-apply disabled — not required"))
 
     # Chrome
     try:
         chrome_path = get_chrome_path()
         results.append(("Chrome/Chromium", ok_mark, chrome_path))
     except FileNotFoundError:
-        results.append(("Chrome/Chromium", fail_mark,
-                        "Install Chrome or set CHROME_PATH env var (needed for auto-apply)"))
+        results.append(("Chrome/Chromium", "[dim]optional[/dim]",
+                        "Auto-apply disabled — not required"))
 
     # Node.js / npx (for Playwright MCP)
     npx_bin = shutil.which("npx")
     if npx_bin:
         results.append(("Node.js (npx)", ok_mark, npx_bin))
     else:
-        results.append(("Node.js (npx)", fail_mark,
-                        "Install Node.js 18+ from nodejs.org (needed for auto-apply)"))
+        results.append(("Node.js (npx)", "[dim]optional[/dim]",
+                        "Auto-apply disabled — not required"))
 
     # CapSolver (optional)
     capsolver = os.environ.get("CAPSOLVER_API_KEY")

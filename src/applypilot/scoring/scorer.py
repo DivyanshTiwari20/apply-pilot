@@ -5,17 +5,19 @@ job description. All personal data is loaded at runtime from the user's
 profile and resume file.
 """
 
-import json
 import logging
 import re
 import time
 from datetime import datetime, timezone
 
-from applypilot.config import RESUME_PATH, load_profile
+from rich.console import Console
+
+from applypilot.config import RESUME_PATH
 from applypilot.database import get_connection, get_jobs_by_stage
 from applypilot.llm import get_client
 
 log = logging.getLogger(__name__)
+console = Console()
 
 
 # ── Scoring Prompt ────────────────────────────────────────────────────────
@@ -123,7 +125,7 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
         jobs = get_jobs_by_stage(conn=conn, stage="pending_score", limit=limit)
 
     if not jobs:
-        log.info("No unscored jobs with descriptions found.")
+        console.print("  [dim]No unscored jobs with descriptions found.[/dim]")
         return {"scored": 0, "errors": 0, "elapsed": 0.0, "distribution": []}
 
     # Convert sqlite3.Row to dicts if needed
@@ -131,7 +133,11 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
         columns = jobs[0].keys()
         jobs = [dict(zip(columns, row)) for row in jobs]
 
-    log.info("Scoring %d jobs sequentially...", len(jobs))
+    est_min = max(1, round(len(jobs) / 15))
+    console.print(
+        f"  Scoring [bold]{len(jobs)}[/bold] jobs "
+        f"[dim](~{est_min} min at Gemini free tier)[/dim]"
+    )
     t0 = time.time()
     completed = 0
     errors = 0
@@ -147,22 +153,38 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
 
         results.append(result)
 
-        log.info(
-            "[%d/%d] score=%d  %s",
-            completed, len(jobs), result["score"], job.get("title", "?")[:60],
+        score_val = result["score"]
+        if score_val >= 7:
+            score_str = f"[green]{score_val}/10[/green]"
+        elif score_val >= 5:
+            score_str = f"[yellow]{score_val}/10[/yellow]"
+        else:
+            score_str = f"[red]{score_val}/10[/red]"
+
+        title = job.get("title", "?")[:45]
+        company = job.get("site", "?")[:20]
+        console.print(
+            f"  [{completed:>{len(str(len(jobs)))}}/{len(jobs)}] "
+            f"{score_str}  {title:<45} @ {company}"
         )
 
-    # Write scores to DB
+    # Write scores to DB — skip score=0 (LLM error) so the job stays pending
+    # and gets retried on the next run instead of being stuck at score=0 forever.
     now = datetime.now(timezone.utc).isoformat()
+    saved = 0
     for r in results:
-        conn.execute(
-            "UPDATE jobs SET fit_score = ?, score_reasoning = ?, scored_at = ? WHERE url = ?",
-            (r["score"], f"{r['keywords']}\n{r['reasoning']}", now, r["url"]),
-        )
+        if r["score"] > 0:
+            conn.execute(
+                "UPDATE jobs SET fit_score = ?, score_reasoning = ?, scored_at = ? WHERE url = ?",
+                (r["score"], f"{r['keywords']}\n{r['reasoning']}", now, r["url"]),
+            )
+            saved += 1
     conn.commit()
 
     elapsed = time.time() - t0
-    log.info("Done: %d scored in %.1fs (%.1f jobs/sec)", len(results), elapsed, len(results) / elapsed if elapsed > 0 else 0)
+    console.print(
+        f"  [bold]Scoring done:[/bold] {saved} saved, {errors} errors (retryable) — {elapsed:.1f}s"
+    )
 
     # Score distribution
     dist = conn.execute("""
